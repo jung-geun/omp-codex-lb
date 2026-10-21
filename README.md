@@ -1,8 +1,10 @@
 # omp-codex-lb
 
-A standalone OMP plugin for one `codex-lb` provider: authenticated model discovery, native per-model protocols, and the selected model's subscription quota display. Supported host: **OMP 18.12.3**. Other versions are not covered by this compatibility statement.
+One standalone OMP plugin package registers two independently configured providers: the existing `codex-lb` gateway and the separate `omniroute` gateway. Each has its own model list, connection settings, commands, and quota display. Existing `CODEX_LB_*` settings, keys, and model roles remain unchanged when adding OmniRoute. Supported host: **OMP 18.12.3**. Other versions are not covered by this compatibility statement.
 
-The package contains the TypeScript extension, release update checker, a trusted Codex metadata snapshot, and this guide. It needs an installed OMP host and an existing codex-lb gateway; it does not install the gateway or require Python. It uses OMP's native inference transports. Source and releases: **https://github.com/jung-geun/omp-codex-lb**. The package is distributed through GitHub, not npm.
+The package contains the TypeScript extension, release update checker, a trusted Codex metadata snapshot, and this guide. It needs an installed OMP host and an existing gateway; it does not install either gateway or require Python. It uses OMP's native inference transports. Source and releases: **https://github.com/jung-geun/omp-codex-lb**. The package is distributed through GitHub, not npm.
+
+The existing `codex-lb` provider remains connected to its configured Codex LB gateway. For the separate OmniRoute instance, use the `omniroute` instructions below and a key issued by that new gateway; do not repoint `CODEX_LB_BASE_URL` or reuse the old gateway's key.
 
 ## Install from GitHub
 
@@ -13,7 +15,7 @@ omp plugin install https://github.com/jung-geun/omp-codex-lb.git
 This tracks the repository's default branch. To pin a reviewed release instead:
 
 ```bash
-omp plugin install 'https://github.com/jung-geun/omp-codex-lb.git#v1.0.0'
+omp plugin install 'https://github.com/jung-geun/omp-codex-lb.git#v1.1.0'
 ```
 
 You may instead clone the public plugin repository and run `omp plugin install .` from its root. When working in the parent gateway checkout, use `omp plugin install ./integrations/omp`.
@@ -51,6 +53,41 @@ omp --model codex-lb/gpt-6.1-sol
 
 That example works only when your key has access to that model. Model visibility is not evidence of remaining quota or a successful inference.
 
+## Connect the separate OmniRoute provider
+
+The same plugin package registers OmniRoute separately as `omniroute`; installing or upgrading it does not replace the existing `codex-lb` provider or change its key, settings, or model roles. For the deployed instance, use the suffix-free origin `https://llm.pieroot.xyz` and an API key issued by **that new OmniRoute gateway**. A key with the same label on another gateway is a different credential. Do not change `CODEX_LB_BASE_URL` or use a Codex/Claude subscription token or upstream API key.
+
+Install the package if needed, or upgrade the existing package:
+
+```bash
+omp plugin install https://github.com/jung-geun/omp-codex-lb.git
+# If already installed:
+omp plugin upgrade omp-codex-lb
+```
+
+In a macOS zsh or bash shell, enter the new gateway key without echoing or placing it in shell history, then refresh discovery:
+
+```bash
+export OMNIROUTE_BASE_URL='https://llm.pieroot.xyz'
+printf 'OmniRoute gateway API key: '
+IFS= read -r -s OMNIROUTE_API_KEY
+printf '\n'
+export OMNIROUTE_API_KEY
+omp models refresh
+omp models omniroute --json
+omp --model omniroute/gpt-6.1-sol
+```
+
+Use only model IDs returned by your gateway. For the deployed Claude roster, `omp --model omniroute/claude-opus-5-5` selects Opus when permitted by your key. In OMP, `/model` selects an `omniroute` model, `/omniroute-connect` shows connection status and setup help, `/omniroute-models` lists models already registered in OMP, and `/omniroute-quota` refreshes quota for the selected OmniRoute model. Restart OMP after changing environment settings. Model discovery does not establish entitlement, available quota, or successful inference.
+
+The environment origin takes precedence over the matching optional profile setting file, `extensions/omniroute-v1.json`. To use that file instead, create it yourself with this exact shape; it contains no key:
+
+```json
+{"schemaVersion":1,"baseOrigin":"https://llm.pieroot.xyz","keyEnv":"OMNIROUTE_API_KEY"}
+```
+
+The referenced `OMNIROUTE_API_KEY` must still be supplied in OMP's environment. Ordinary plugin installation does not create the settings file or store credentials. Configure OmniRoute's API-key scopes and model/account entitlements in the new gateway. Enable **Shared Account Quota** there only if you want its account-pool quota disclosed; the choice does not alter model roles or grant management access. Refresh models and restart OMP after gateway access changes.
+
 ### Environment reference
 
 | Variable | Meaning |
@@ -58,6 +95,9 @@ That example works only when your key has access to that model. Model visibility
 | `CODEX_LB_BASE_URL` | Gateway HTTPS origin, such as `https://your-gateway.example`. Do not append `/v1` or `/backend-api/codex`; paths, userinfo, query strings, and fragments are rejected. A trailing `/` is accepted. |
 | `CODEX_LB_API_KEY` | Gateway API key, used when no alternative key variable is selected. |
 | `CODEX_LB_KEY_ENV` | Optional **name** of another environment variable holding the gateway key, not the key itself. Defaults to `CODEX_LB_API_KEY`. |
+| `OMNIROUTE_BASE_URL` | Independent OmniRoute HTTPS origin, for example `https://llm.pieroot.xyz`, without a path suffix. Never changes the Codex LB origin. |
+| `OMNIROUTE_API_KEY` | Key issued by the independent OmniRoute gateway. It is not the existing Codex LB key. |
+| `OMNIROUTE_KEY_ENV` | Optional name of another environment variable holding the OmniRoute gateway key. Defaults to `OMNIROUTE_API_KEY`. |
 
 For an existing key variable:
 
@@ -86,6 +126,8 @@ Discovery reads `/v1/omp/models` using your gateway key and retains the native p
 OMP's runtime model cache is normally 24 hours, so force a refresh after gateway account, model, or access changes. Refreshing does not rewrite `models.yml` or model roles.
 
 The quota status follows the selected model's provider, refreshes every 60 seconds, and clears when another provider is selected. `/lb-quota` requests `/v1/usage/quota?model=<id>` and shows details; it does not replace OMP's `/usage`. No extra automatic quota widget is added. Remaining percentages and account-pool equivalents are **not token credit, an official token cap, prepaid balance, or an API rate-limit allowance**. Missing, stale, or failed observations remain unknown/unavailable. Discovery and static fallbacks cannot bypass gateway authorization, assignments, subscription exhaustion, or billing policy.
+
+On OmniRoute, enable **Shared Account Quota** for the gateway key in API Keys to opt in to pool quota disclosure. Disabling or revoking `self:account-quota` hides quota without granting management access or changing model permissions.
 
 ### How to place quota beside context length
 
@@ -140,7 +182,7 @@ omp plugin upgrade omp-codex-lb
 # Restart OMP after the upgrade.
 ```
 
-A tag-pinned installation stays pinned when upgraded. To move it to a reviewed release, install that new tag explicitly, e.g. `omp plugin install 'https://github.com/jung-geun/omp-codex-lb.git#v1.0.1'` once that release exists. For a local-path installation, update your trusted clone with your normal source-control workflow and restart OMP; the link uses that source directly. No updater automatically changes the checked-out source.
+A tag-pinned installation stays pinned when upgraded. To move it to a reviewed release, install that tag explicitly, e.g. `omp plugin install 'https://github.com/jung-geun/omp-codex-lb.git#v1.1.0'`. For a local-path installation, update your trusted clone with your normal source-control workflow and restart OMP; the link uses that source directly. No updater automatically changes the checked-out source.
 
 Users can also subscribe on GitHub using **Watch → Custom → Releases** for notifications outside OMP.
 
